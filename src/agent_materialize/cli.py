@@ -284,6 +284,25 @@ def drop(name: str, yes: bool = typer.Option(False, "--yes")) -> None:
     typer.echo(f"✓ dropped {name}")
 
 
+dashboard_app = typer.Typer(help="Static HTML dashboard")
+app.add_typer(dashboard_app, name="dashboard")
+
+
+@dashboard_app.command("build")
+def dashboard_build(
+    out: Path = typer.Option(Path("dashboard.html"), "--out", help="Output HTML path"),
+) -> None:
+    """Build a static dashboard.html from runtime DB state."""
+    from agent_materialize.dashboard import build_dashboard
+
+    build_dashboard(
+        runtime_dsn=_runtime_dsn(),
+        config_path=Path.cwd() / "materialize.yaml",
+        out_path=out,
+    )
+    typer.echo(f"✓ wrote {out}")
+
+
 def main() -> None:
     app()
 

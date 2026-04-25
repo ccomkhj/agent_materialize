@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>agent-materialize — {{ target_schema }}</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; }
+h1 { font-size: 1.4rem; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 0.9rem; }
+th { background: #f4f4f4; }
+.failed { color: #b00; font-weight: bold; }
+.section { margin-top: 2rem; }
+.muted { color: #888; font-size: 0.85rem; }
+.graph { background: #fafafa; padding: 1rem; border: 1px solid #eee; }
+</style>
+</head>
+<body>
+<h1>agent-materialize</h1>
+<div class="muted">target schema: <code>{{ target_schema }}</code> · generated {{ generated_at }} · {{ views|length }} view(s)</div>
+
+<div class="section">
+<h2>Status</h2>
+<table>
+<thead><tr>
+<th>view</th><th>description</th><th>sources</th>
+<th>last refreshed</th><th>rows</th><th>last status</th>
+</tr></thead>
+<tbody>
+{% for v in views %}
+<tr>
+  <td><code>{{ v.name }}</code></td>
+  <td>{{ v.description }}</td>
+  <td><code>{{ v.sources|join(", ") }}</code></td>
+  <td>{{ v.last_refreshed_at or "—" }}</td>
+  <td>{{ v.row_count }}</td>
+  <td class="{{ 'failed' if v.last_status == 'failed' else '' }}">{{ v.last_status or "—" }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+<div class="section">
+<h2>Lineage</h2>
+<div class="graph">{{ lineage_svg | safe }}</div>
+</div>
+
+<div class="section">
+<h2>Recent refresh history (last 50)</h2>
+<table>
+<thead><tr>
+<th>view</th><th>started</th><th>finished</th><th>status</th><th>mode</th><th>rows</th><th>error</th>
+</tr></thead>
+<tbody>
+{% for h in history %}
+<tr>
+  <td><code>{{ h.view_name }}</code></td>
+  <td>{{ h.started_at }}</td>
+  <td>{{ h.finished_at or "—" }}</td>
+  <td class="{{ 'failed' if h.status == 'failed' else '' }}">{{ h.status }}</td>
+  <td>{{ h.mode or "—" }}</td>
+  <td>{{ h.rows_after if h.rows_after is not none else "—" }}</td>
+  <td>{{ h.error or "" }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</body>
+</html>
