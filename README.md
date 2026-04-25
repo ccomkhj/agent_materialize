@@ -35,29 +35,57 @@ The fix that everyone reaches for first is "just write some views and point the 
 
 ## Quickstart
 
+> **Run these commands in your own project directory, not inside this repo.** `agent-mv init` scaffolds a project; running it in the package's own source tree creates artifacts that don't belong there.
+
+### 1. Install
+
+The package isn't on PyPI yet. Install from source — pick whichever fits your workflow:
+
 ```bash
-# 1. Install
-uv add agent-materialize
-brew install graphviz   # for the dashboard
+# Option A: from a local clone (recommended while iterating)
+git clone https://github.com/<you>/agent-materialize ~/code/agent-materialize
+cd ~/your-project
+uv add ~/code/agent-materialize
 
-# 2. Scaffold the project
+# Option B: directly from git
+cd ~/your-project
+uv add git+https://github.com/<you>/agent-materialize
+
+# Once published:
+# uv add agent-materialize
+
+# Plus the system dep for the dashboard
+brew install graphviz   # macOS  (apt install graphviz on Debian/Ubuntu)
+```
+
+### 2. Scaffold and configure
+
+```bash
+cd ~/your-project       # NOT the agent-materialize repo
 agent-mv init           # writes materialize.yaml, .env.example, materialize/, symlinks skills
-
-# 3. Configure connection strings
 cp .env.example .env
 # Fill in DATABASE_URL, AGENT_MV_RUNTIME_URL, and AGENT_MV_RUNTIME_PASSWORD.
 # `agent-mv` auto-loads .env from the current directory.
+```
 
-# 4. One-time discovery (agent does this through setup-mcp)
-#    Wire up setup-mcp in your MCP client, then ask the agent:
-#    "run the setup-database skill"
+### 3. Discovery (one-time, agent-driven)
 
-# 5. Apply, verify, use
+Wire up `setup-mcp` in your MCP client, then ask the agent: *"run the setup-database skill"*. The agent introspects the schema, reads your codebase, proposes views, and writes them into `materialize.yaml` after you approve.
+
+### 4. Apply, verify, use
+
+```bash
 agent-mv apply          # creates schema, roles, views, lineage table, refresh function
 agent-mv doctor         # asserts the access boundary
 agent-mv status         # see what's there
 agent-mv dashboard build && open dashboard.html
 ```
+
+After `apply` succeeds, switch your agent's MCP config from `setup-mcp` to `runtime-mcp` and you're done.
+
+### Working on agent-materialize itself?
+
+If you're contributing to this repo (not using it from another project), see [Development](#development) instead — `uv sync` from the repo root sets up the editable install.
 
 After `apply`, swap your agent's MCP config from `setup-mcp` to `runtime-mcp` and you're done. The agent now has a clean, narrow surface that maps to the questions your code actually asks.
 
