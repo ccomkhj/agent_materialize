@@ -59,7 +59,7 @@ def bootstrap_schema(
                 RETURNS jsonb
                 LANGUAGE plpgsql
                 SECURITY DEFINER
-                SET search_path = pg_catalog, public
+                SET search_path = pg_catalog
                 AS $$
                 DECLARE
                     v_started timestamptz := clock_timestamp();
@@ -69,6 +69,10 @@ def bootstrap_schema(
                     v_has_unique_idx boolean;
                     v_history_id bigint;
                 BEGIN
+                    IF length(p_name) > 128 THEN
+                        RAISE EXCEPTION 'view name too long';
+                    END IF;
+
                     -- Validate name appears in lineage (acts as allowlist)
                     IF NOT EXISTS (
                         SELECT 1 FROM {target_schema}.lineage WHERE view_name = p_name
@@ -131,11 +135,15 @@ def bootstrap_schema(
                 """
             )
 
-            # Grants for runtime role
+            # REVOKE FROM PUBLIC does not touch named-role grants; do it first to make the
+            # schema private, then issue all named-role grants.
+            cur.execute(f"REVOKE ALL ON SCHEMA {target_schema} FROM PUBLIC")
             cur.execute(f"GRANT USAGE ON SCHEMA {target_schema} TO {runtime_role}")
             cur.execute(
                 f"GRANT SELECT ON ALL TABLES IN SCHEMA {target_schema} TO {runtime_role}"
             )
+            # ALTER DEFAULT PRIVILEGES is grantor-scoped: future tables created by THIS
+            # admin role will auto-grant SELECT to runtime. apply.py must use the same DSN.
             cur.execute(
                 f"ALTER DEFAULT PRIVILEGES IN SCHEMA {target_schema} "
                 f"GRANT SELECT ON TABLES TO {runtime_role}"
@@ -143,7 +151,3 @@ def bootstrap_schema(
             cur.execute(
                 f"GRANT EXECUTE ON FUNCTION {target_schema}.refresh_view(text) TO {runtime_role}"
             )
-
-            # Explicitly REVOKE everything else from PUBLIC on the schema (defense in depth)
-            cur.execute(f"REVOKE ALL ON SCHEMA {target_schema} FROM PUBLIC")
-            cur.execute(f"GRANT USAGE ON SCHEMA {target_schema} TO {runtime_role}")

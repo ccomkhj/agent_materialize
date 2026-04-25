@@ -58,3 +58,37 @@ def test_runtime_role_cannot_select_base_tables(with_base_tables):
 def test_bootstrap_idempotent(fresh_db):
     bootstrap_schema(fresh_db, target_schema="agent_mv", runtime_role="rt", runtime_password="rt")
     bootstrap_schema(fresh_db, target_schema="agent_mv", runtime_role="rt", runtime_password="rt")
+
+
+def test_runtime_role_cannot_write_to_lineage(fresh_db):
+    """The lineage table is the SECURITY DEFINER allowlist; runtime must not be able to add to it."""
+    bootstrap_schema(fresh_db, target_schema="agent_mv", runtime_role="rt", runtime_password="rt")
+    runtime = _runtime_url(fresh_db, "rt", "rt")
+    with psycopg.connect(runtime) as conn:
+        with conn.cursor() as cur:
+            for stmt in [
+                "INSERT INTO agent_mv.lineage VALUES ('attacker_view', 'table', 'public.users')",
+                "UPDATE agent_mv.lineage SET view_name = 'x' WHERE true",
+                "DELETE FROM agent_mv.lineage WHERE true",
+            ]:
+                try:
+                    cur.execute(stmt)
+                except psycopg.errors.InsufficientPrivilege:
+                    conn.rollback()
+                    continue
+                raise AssertionError(f"runtime role MUST NOT be able to: {stmt}")
+
+
+def test_runtime_role_cannot_write_to_refresh_history(fresh_db):
+    bootstrap_schema(fresh_db, target_schema="agent_mv", runtime_role="rt", runtime_password="rt")
+    runtime = _runtime_url(fresh_db, "rt", "rt")
+    with psycopg.connect(runtime) as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(
+                    "INSERT INTO agent_mv.refresh_history (view_name, status, mode) "
+                    "VALUES ('x', 'success', 'concurrent')"
+                )
+            except psycopg.errors.InsufficientPrivilege:
+                return
+            raise AssertionError("runtime role MUST NOT be able to insert into refresh_history")
