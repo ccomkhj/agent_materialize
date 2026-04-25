@@ -28,66 +28,112 @@ The fix that everyone reaches for first is "just write some views and point the 
 |---|---|
 | **`setup-mcp` server** | Privileged. Used once. Lets the agent introspect the schema, sample data, read your consuming codebase, and propose materialized views. |
 | **`runtime-mcp` server** | View-only. Used every day. The agent's daily-driver MCP — list, describe, query, refresh, lineage. Can't see base tables. |
-| **`agent-mv` CLI** | Human entry point: `init`, `apply`, `doctor`, `status`, `refresh`, `refresh-all`, `drop`, `dashboard build`. |
+| **`agent-mv` CLI** | What your agent runs under the hood during setup, available to you as an escape hatch: `init`, `apply`, `doctor`, `status`, `refresh`, `refresh-all`, `drop`, `dashboard build`. |
 | **Static HTML dashboard** | View-status table, refresh history, and an inline SVG lineage graph. No server. |
 | **Four skills** | `setup-database`, `querying-views`, `adding-a-view`, `troubleshoot-refresh`. Symlinked into `.claude/skills/` on `init`. |
+| **Slash commands** | `/agent-materialize-onboard`, `/agent-materialize-add-view`, `/agent-materialize-troubleshoot` — user-typed entry points that load the matching skill. Symlinked into `.claude/commands/` on `init`. |
 | **`materialize.yaml`** | Single source of truth for view definitions. Lineage is parsed by sqlglot at apply-time and written back into the YAML. |
 
 ## Quickstart
 
-> **Run these commands in your own project directory, not inside this repo.** `agent-mv init` scaffolds a project; running it in the package's own source tree creates artifacts that don't belong there.
+> **Run these commands in your own project directory, not inside this repo.** Scaffolding lands in your CWD; you don't want it inside this package's source tree.
 
-### 1. Install
+The flow is **skill-first**. You install the package, point your MCP client at the setup server, and ask your agent to run the `setup-database` skill. The agent does the typing — scaffolding, schema exploration, view proposals, apply, doctor. You stay in the loop on view approvals and DDL confirmations.
 
-The package isn't on PyPI yet. Install it as a **global CLI tool** with `uv tool install` — that puts `agent-mv` on your PATH in its own isolated environment, no venv-activation needed:
+### 1. Install the CLI
+
+The package isn't on PyPI yet. Install it as a **global CLI tool** with `uv tool install` — that puts `agent-mv` on your PATH in its own isolated environment, no venv-activation needed. Your agent calls these commands under the hood; you rarely type them yourself.
 
 ```bash
-git clone https://github.com/<you>/agent-materialize ~/code/agent-materialize
-cd ~/code/agent-materialize
+git clone https://github.com/ccomkhj/agent-materialize
+cd agent-materialize
 uv tool install .
 
 # If `agent-mv` isn't found afterward, ensure uv's bin dir is on PATH:
 uv tool update-shell && exec $SHELL
 
-# Once published to PyPI:
-# uv tool install agent-materialize
-
 # Plus the system dep for the dashboard
 brew install graphviz   # macOS  (apt install graphviz on Debian/Ubuntu)
 ```
 
-> **Why `uv tool install` and not `uv add`?** `uv add` registers a library dependency inside one specific project's `.venv/`. `uv tool install` is uv's "install this CLI globally, in an isolated env" mode — closer to `pipx install`. For agent-materialize you want the second one: `agent-mv` is a CLI you'll call from any project directory.
+> **Why `uv tool install` and not `uv add`?** `uv add` registers a library dependency inside one specific project's `.venv/`. `uv tool install` is uv's "install this CLI globally, in an isolated env" mode — closer to `pipx install`. For agent-materialize you want the second one: `agent-mv` is a CLI invoked from any project directory.
 
-### 2. Scaffold and configure
+### 2. Scaffold the project
 
-```bash
-cd ~/your-project       # NOT the agent-materialize repo
-agent-mv init           # writes materialize.yaml, .env.example, materialize/, symlinks skills
-cp .env.example .env
-# Fill in DATABASE_URL, AGENT_MV_RUNTIME_URL, and AGENT_MV_RUNTIME_PASSWORD.
-# `agent-mv` auto-loads .env from the current directory.
-```
-
-### 3. Discovery (one-time, agent-driven)
-
-Wire up `setup-mcp` in your MCP client, then ask the agent: *"run the setup-database skill"*. The agent introspects the schema, reads your codebase, proposes views, and writes them into `materialize.yaml` after you approve.
-
-### 4. Apply, verify, use
+In your project directory, write `.env` and run `agent-mv init`:
 
 ```bash
-agent-mv apply          # creates schema, roles, views, lineage table, refresh function
-agent-mv doctor         # asserts the access boundary
-agent-mv status         # see what's there
-agent-mv dashboard build && open dashboard.html
+cd your-project
+cat > .env <<'EOF'
+DATABASE_URL=postgresql://USER:PASS@HOST:5432/DBNAME             # full setup-time privileges
+# Runtime credentials are decided in step 4. Leave as placeholders for now:
+AGENT_MV_RUNTIME_URL=postgresql://agent_mv_runtime:CHANGEME@HOST:5432/DBNAME
+AGENT_MV_RUNTIME_PASSWORD=CHANGEME
+EOF
+
+agent-mv init
 ```
 
-After `apply` succeeds, switch your agent's MCP config from `setup-mcp` to `runtime-mcp` and you're done.
+`init` writes `materialize.yaml`, `.env.example`, `.mcp.json` (wires up the setup MCP), `materialize/`, and symlinks the four skills into `.claude/skills/agent-materialize/`. The MCP servers auto-load `.env` from the working directory.
+
+This is the only step you type by hand. (You can skip it and have your agent run `agent-mv init` mid-session, but you'll then have to reconnect MCP servers so the setup MCP loads — see the `setup-database` skill.)
+
+### 3. Onboard
+
+Start your agent in the project directory (so it picks up `.mcp.json` and the symlinked commands) and type:
+
+```
+/agent-materialize-onboard
+```
+
+That slash command loads the `setup-database` skill and walks the agent through the rest. (Equivalent to pasting *"Load the setup-database skill from .claude/skills/agent-materialize/ and follow it."*)
+
+Your agent will:
+
+1. Ask **what questions your consuming app or agent actually asks** of this DB — have one or two real examples ready (e.g. *"which POs need to be created?"*, *"which SKUs are running low?"*). Without this the proposals are generic.
+2. Read your codebase and explore the Postgres schema via the setup MCP.
+3. Propose 3–5 materialized views **with sample rows** and wait for your approval on each.
+4. Ask whether you want a strict access boundary (separate `agent_mv_runtime` role — recommended) or to temporarily reuse the superuser DSN.
+5. Run `agent-mv apply` — creates the `agent_mv` schema, the runtime role, the views, the lineage table, and the `SECURITY DEFINER` refresh function. You confirm any drops.
+6. Run `agent-mv doctor` — proves the runtime role cannot read base tables.
+
+You stay in the loop on the parts that matter: you describe the workload, you approve every view, you read the apply diff, you confirm drops, you decide on the boundary. The agent just does the typing.
+
+### 4. Switch to the runtime MCP
+
+Once `doctor` passes, swap `agent-materialize-setup-mcp` → `agent-materialize-runtime-mcp` in your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "agent-materialize-runtime": {
+      "command": "agent-materialize-runtime-mcp"
+    }
+  }
+}
+```
+
+Then **reconnect MCP** (`/mcp` in Claude Code, or restart the session) so the swap takes effect.
+
+The runtime MCP can list, describe, query, refresh, and trace lineage — but cannot read base tables, drop views, or refresh anything not on the lineage allowlist. Your agent now has a clean, narrow surface that maps to the questions your code actually asks.
 
 ### Working on agent-materialize itself?
 
 If you're contributing to this repo (not using it from another project), see [Development](#development) instead — `uv sync` from the repo root sets up the editable install.
 
-After `apply`, swap your agent's MCP config from `setup-mcp` to `runtime-mcp` and you're done. The agent now has a clean, narrow surface that maps to the questions your code actually asks.
+## Troubleshooting
+
+**`agent-mv doctor` fails with `password authentication failed for user "agent_mv_runtime"`.** The role already exists from a prior install with a different password, and `agent-mv apply` does not rotate passwords on existing roles. Sync it by hand:
+
+```bash
+psql "$DATABASE_URL" -c "ALTER ROLE agent_mv_runtime WITH PASSWORD '$AGENT_MV_RUNTIME_PASSWORD';"
+```
+
+Then re-run `agent-mv doctor`.
+
+**Setup MCP fails every tool call with `DATABASE_URL is required for setup-mcp`.** The MCP server can't see your `.env`. Either it was launched before the file existed, or its working directory isn't under the project. Make sure `.env` lives at the project root, then reconnect the MCP (`/mcp`, or restart the session).
+
+**The agent proposes generic views that don't match your workload.** It's missing context on what your consumer actually asks. Re-run `/agent-materialize-onboard` and lead with concrete example questions ("which POs need to be created?", "what's selling slow on Amazon?") before letting it explore.
 
 ## How it works
 
@@ -178,6 +224,8 @@ The `sources` field is owned by the lineage parser. Humans don't write it.
 
 ## CLI reference
 
+These are what your agent runs for you. You typically don't type them by hand — but they're there as an escape hatch (CI, scripted ops, debugging a stuck setup):
+
 ```
 agent-mv init                  # scaffold materialize.yaml, .env.example, materialize/, skills
 agent-mv discover              # printable instructions; discovery is agent-driven via setup-mcp
@@ -189,6 +237,8 @@ agent-mv refresh-all           # refresh all views in topological order
 agent-mv drop <name>           # remove from YAML and from the database
 agent-mv dashboard build       # render dashboard.html
 ```
+
+For day-to-day querying, your agent uses the runtime MCP's tools (`list_views`, `describe_view`, `query_view`, `refresh_view`, `get_lineage`) instead of the CLI.
 
 ## System dependencies
 
@@ -204,6 +254,14 @@ uv run pytest -v
 ```
 
 Integration tests use `testcontainers` to spin up an ephemeral Postgres per test database. Docker must be running. The full suite is 69 tests, ~6 seconds.
+
+If you also installed `agent-mv` globally with `uv tool install .`, that's a **snapshot** of the source at install time — local edits won't show up in the global CLI or in MCP servers launched from `.mcp.json`. After changing source, refresh the global binary:
+
+```bash
+uv tool install --reinstall .
+```
+
+Then reconnect any MCP clients so they pick up the new server binary.
 
 ## Non-goals (v0.1.0)
 
