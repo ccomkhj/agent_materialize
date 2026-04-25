@@ -9,3 +9,4 @@ build/
 .materialize-staging.yaml
 dashboard.html
 .env
+docs/superpowers/

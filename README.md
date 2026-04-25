@@ -176,8 +176,6 @@ uv run pytest -v
 
 Integration tests use `testcontainers` to spin up an ephemeral Postgres per test database. Docker must be running. The full suite is 69 tests, ~6 seconds.
 
-The design spec lives at [`docs/superpowers/specs/2026-04-25-agent-materialize-design.md`](docs/superpowers/specs/2026-04-25-agent-materialize-design.md). The implementation plan that produced this codebase is at [`docs/superpowers/plans/2026-04-25-agent-materialize.md`](docs/superpowers/plans/2026-04-25-agent-materialize.md).
-
 ## Non-goals (v0.1.0)
 
 - **Column-level lineage.** Table-level only for v1; column-level is on the roadmap.
