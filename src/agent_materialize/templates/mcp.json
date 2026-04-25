@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "agent-materialize-setup": {
+      "command": "agent-materialize-setup-mcp"
+    }
+  }
+}

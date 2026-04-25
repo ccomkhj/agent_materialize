@@ -31,6 +31,7 @@ packages = ["src/agent_materialize"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/agent_materialize/skills" = "agent_materialize/skills"
+"src/agent_materialize/commands" = "agent_materialize/commands"
 "src/agent_materialize/templates" = "agent_materialize/templates"
 
 [dependency-groups]

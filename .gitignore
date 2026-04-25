@@ -15,5 +15,6 @@ docs/superpowers/
 # Real user projects use their own materialize.yaml etc. — not this repo.
 /.claude/
 /.env.example
+/.mcp.json
 /materialize.yaml
 /materialize/

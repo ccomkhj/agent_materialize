@@ -149,7 +149,12 @@ def get_lineage(name: str) -> dict:
 
 
 def main() -> None:
+    from pathlib import Path
+
+    from dotenv import load_dotenv
     from mcp.server.fastmcp import FastMCP
+
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
 
     server = FastMCP("agent-materialize-runtime")
     server.tool()(list_views)

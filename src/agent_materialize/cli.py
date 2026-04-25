@@ -13,7 +13,7 @@ app = typer.Typer(help="agent-materialize CLI")
 @app.callback()
 def _autoload_env() -> None:
     """Load .env from cwd before running any subcommand. Existing env vars win."""
-    load_dotenv()
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
 
 
 SKILL_NAMES = [
@@ -21,6 +21,13 @@ SKILL_NAMES = [
     "querying-views.md",
     "adding-a-view.md",
     "troubleshoot-refresh.md",
+]
+
+# (dst_filename, src_filename) — dst names are user-typed slash commands.
+COMMAND_FILES = [
+    ("agent-materialize-onboard.md", "onboard.md"),
+    ("agent-materialize-add-view.md", "add-view.md"),
+    ("agent-materialize-troubleshoot.md", "troubleshoot.md"),
 ]
 
 
@@ -50,6 +57,11 @@ def init() -> None:
     )
     (cwd / "materialize").mkdir(exist_ok=True)
 
+    mcp_path = cwd / ".mcp.json"
+    if not mcp_path.exists():
+        mcp_template = (Path(__file__).parent / "templates" / "mcp.json").read_text()
+        mcp_path.write_text(mcp_template)
+
     skills_dst = cwd / ".claude" / "skills" / "agent-materialize"
     skills_dst.mkdir(parents=True, exist_ok=True)
     skills_src = Path(__file__).parent / "skills"
@@ -63,11 +75,26 @@ def init() -> None:
         except OSError:
             shutil.copy2(src, dst)
 
+    commands_dst = cwd / ".claude" / "commands"
+    commands_dst.mkdir(parents=True, exist_ok=True)
+    commands_src = Path(__file__).parent / "commands"
+    for dst_name, src_name in COMMAND_FILES:
+        src = commands_src / src_name
+        dst = commands_dst / dst_name
+        if dst.exists() or dst.is_symlink():
+            continue
+        try:
+            os.symlink(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+
     typer.echo("✓ initialized agent-materialize")
     typer.echo("  - materialize.yaml")
     typer.echo("  - .env.example")
     typer.echo("  - materialize/")
+    typer.echo("  - .mcp.json (setup MCP wired up)")
     typer.echo(f"  - skills symlinked to {skills_dst}")
+    typer.echo(f"  - slash commands symlinked to {commands_dst}")
 
 
 @app.command()
@@ -104,6 +131,7 @@ def apply(
     runtime_password = os.environ.get("AGENT_MV_RUNTIME_PASSWORD", "agent_mv_runtime")
 
     cfg = load_config(yaml_path)
+    has_configured_views = bool(cfg.views)
 
     def _confirm(names: list[str]) -> bool:
         if yes:
@@ -118,6 +146,17 @@ def apply(
         runtime_password=runtime_password,
         confirm_drops=_confirm,
     )
+    if not has_configured_views:
+        typer.echo(
+            "No views are configured in materialize.yaml, so `agent-mv apply` only "
+            "bootstrapped the schema/roles and reconciled any existing materialized views.\n"
+            "To choose views interactively, wire up the setup MCP and run the "
+            "`setup-database` skill, or add view definitions to materialize.yaml and re-run "
+            "`agent-mv apply`."
+        )
+        typer.echo("✓ applied 0 view(s)")
+        return
+
     typer.echo(f"✓ applied {len(cfg.views)} view(s)")
 
 
@@ -156,28 +195,34 @@ def doctor() -> None:
                 pass  # schema exists but table not yet created — grants are set at schema level
 
     # 3. CRITICAL: runtime role MUST NOT be able to read base tables.
-    # Find any user table in `public` to test against; if none, error out.
+    # Find any user table outside agent_mv / system schemas to test against.
     with psycopg.connect(admin_dsn) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT tablename FROM pg_tables WHERE schemaname='public' LIMIT 1"
+                """
+                SELECT schemaname, tablename FROM pg_tables
+                WHERE schemaname NOT LIKE 'pg_%%'
+                  AND schemaname NOT IN ('information_schema', 'agent_mv')
+                ORDER BY schemaname, tablename
+                LIMIT 1
+                """
             )
             row = cur.fetchone()
     if row is None:
         typer.echo(
-            "⚠ no tables in public schema; cannot verify access boundary. "
-            "Create at least one base table and re-run.",
+            "⚠ no user tables found outside agent_mv; cannot verify access boundary. "
+            "Create at least one base table in a user schema and re-run.",
             err=True,
         )
         raise typer.Exit(code=1)
-    sample_table = row[0]
+    sample_schema, sample_table = row
 
     with psycopg.connect(runtime_dsn) as conn:
         with conn.cursor() as cur:
             try:
-                cur.execute(f"SELECT 1 FROM public.{sample_table} LIMIT 1")
+                cur.execute(f'SELECT 1 FROM "{sample_schema}"."{sample_table}" LIMIT 1')
                 typer.echo(
-                    f"✗ access boundary FAILED: runtime role can read public.{sample_table}",
+                    f"✗ access boundary FAILED: runtime role can read {sample_schema}.{sample_table}",
                     err=True,
                 )
                 raise typer.Exit(code=1)
