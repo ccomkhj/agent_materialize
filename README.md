@@ -45,7 +45,8 @@ agent-mv init           # writes materialize.yaml, .env.example, materialize/, s
 
 # 3. Configure connection strings
 cp .env.example .env
-# Fill in DATABASE_URL (full role, used during setup) and AGENT_MV_RUNTIME_URL (view-only)
+# Fill in DATABASE_URL, AGENT_MV_RUNTIME_URL, and AGENT_MV_RUNTIME_PASSWORD.
+# `agent-mv` auto-loads .env from the current directory.
 
 # 4. One-time discovery (agent does this through setup-mcp)
 #    Wire up setup-mcp in your MCP client, then ask the agent:

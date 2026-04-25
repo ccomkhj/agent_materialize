@@ -5,8 +5,15 @@ import shutil
 from pathlib import Path
 
 import typer
+from dotenv import load_dotenv
 
 app = typer.Typer(help="agent-materialize CLI")
+
+
+@app.callback()
+def _autoload_env() -> None:
+    """Load .env from cwd before running any subcommand. Existing env vars win."""
+    load_dotenv()
 
 
 SKILL_NAMES = [
@@ -34,8 +41,12 @@ def init() -> None:
     (cwd / ".env.example").write_text(
         "# Connection string with full setup-time privileges (used by agent-mv apply + setup-mcp)\n"
         "DATABASE_URL=postgresql://USER:PASS@HOST:5432/DBNAME\n"
-        "# Connection string with view-only runtime privileges (used by runtime-mcp)\n"
+        "# Connection string with view-only runtime privileges (used by runtime-mcp).\n"
+        "# The password here MUST match AGENT_MV_RUNTIME_PASSWORD below.\n"
         "AGENT_MV_RUNTIME_URL=postgresql://agent_mv_runtime:PASS@HOST:5432/DBNAME\n"
+        "# Password set on the runtime role when `agent-mv apply` first creates it.\n"
+        "# Must match the password embedded in AGENT_MV_RUNTIME_URL above. Default: agent_mv_runtime.\n"
+        "AGENT_MV_RUNTIME_PASSWORD=PASS\n"
     )
     (cwd / "materialize").mkdir(exist_ok=True)
 

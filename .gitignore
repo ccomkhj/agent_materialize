@@ -10,3 +10,10 @@ build/
 dashboard.html
 .env
 docs/superpowers/
+
+# Artifacts from running `agent-mv init` at the repo root (dev testing).
+# Real user projects use their own materialize.yaml etc. — not this repo.
+/.claude/
+/.env.example
+/materialize.yaml
+/materialize/
