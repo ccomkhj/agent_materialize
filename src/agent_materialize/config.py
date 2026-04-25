@@ -51,9 +51,10 @@ def load_config(path: Path) -> Config:
     except yaml.YAMLError as exc:
         raise ConfigError(f"failed to parse {path}: {exc}") from exc
     except ValidationError as exc:
-        if "version" in str(exc):
+        errors = exc.errors()
+        if any(e["loc"] == ("version",) for e in errors):
             raise ConfigError(f"unsupported version in {path}: {exc}") from exc
-        if "duplicate" in str(exc):
+        if any("duplicate" in e.get("msg", "") for e in errors):
             raise ConfigError(f"duplicate view names in {path}: {exc}") from exc
         raise ConfigError(f"invalid config {path}: {exc}") from exc
 
