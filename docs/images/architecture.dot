@@ -1,0 +1,63 @@
+digraph arch {
+  rankdir=LR
+  bgcolor="white"
+  pad=0.4
+  nodesep=0.45
+  ranksep=0.7
+  splines=spline
+  node [fontname="Helvetica" fontsize="11" margin="0.18,0.10"]
+  edge [fontname="Helvetica" fontsize="9" color="#666666"]
+
+  // ── Left column: principals ──
+  agent [label="AI Agent\n(Claude / etc.)" shape=box style="rounded,filled" fillcolor="#FFE7C7" color="#C97B2A" penwidth=1.2]
+  human [label="Human operator" shape=box style="rounded,filled" fillcolor="#E5E0FF" color="#5A4FB1" penwidth=1.2]
+
+  // ── Middle: agent-materialize boundary ──
+  subgraph cluster_amv {
+    label="agent-materialize"
+    style="rounded,filled"
+    fillcolor="#F7F7F4"
+    color="#B0B0A8"
+    fontname="Helvetica"
+    fontsize="11"
+    labeljust="l"
+
+    setup_mcp   [label="setup-mcp\n(privileged)"     shape=box style="rounded,filled" fillcolor="#FFD0D0" color="#B23A3A"]
+    runtime_mcp [label="runtime-mcp\n(view-only)"   shape=box style="rounded,filled" fillcolor="#D0E8D0" color="#3A8A3A"]
+    cli         [label="agent-mv CLI"               shape=box style="rounded,filled" fillcolor="#E8E8E8" color="#666666"]
+    dashboard   [label="dashboard.html\n(static)"   shape=box style="rounded,filled" fillcolor="#E8E8E8" color="#666666"]
+  }
+
+  // ── Right: Postgres ──
+  subgraph cluster_pg {
+    label="Postgres"
+    style="rounded,filled"
+    fillcolor="#EAF2FB"
+    color="#5A7AA8"
+    fontname="Helvetica"
+    fontsize="11"
+    labeljust="l"
+
+    base  [label="public.users\npublic.orders\n…(base tables)" shape=box style="filled" fillcolor="#FFFFFF" color="#5A7AA8"]
+    mv    [label="agent_mv schema\nmaterialized views\n+ refresh_view()" shape=box style="filled" fillcolor="#D6E8FF" color="#3A6BB2"]
+
+    base -> mv [label="derived by\nagent-mv apply" color="#3A6BB2" style="solid" arrowhead="vee"]
+  }
+
+  // ── Edges: setup phase ──
+  agent       -> setup_mcp   [label="discovery\n(once)" color="#B23A3A" arrowhead="vee"]
+  setup_mcp   -> base        [label="explore +\nsample" color="#B23A3A" arrowhead="vee"]
+  setup_mcp   -> mv          [label="create" color="#B23A3A" arrowhead="vee"]
+
+  // ── Edges: runtime phase ──
+  agent       -> runtime_mcp [label="query +\nrefresh" color="#3A8A3A" arrowhead="vee" penwidth=1.6]
+  runtime_mcp -> mv          [label="SELECT,\nrefresh_view()" color="#3A8A3A" arrowhead="vee" penwidth=1.6]
+  runtime_mcp -> base        [label="DENIED" color="#B23A3A" style="dashed" arrowhead="tee" fontcolor="#B23A3A"]
+
+  // ── Edges: human side ──
+  human -> cli       [color="#5A4FB1" arrowhead="vee"]
+  human -> dashboard [color="#5A4FB1" arrowhead="vee"]
+  cli   -> base      [label="apply" color="#5A4FB1" arrowhead="vee"]
+  cli   -> mv        [color="#5A4FB1" arrowhead="vee"]
+  dashboard -> mv    [label="reads\nstats" color="#5A4FB1" arrowhead="vee"]
+}
