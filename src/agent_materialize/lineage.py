@@ -21,7 +21,9 @@ def parse_sources(sql: str, target_schema: str) -> tuple[set[str], set[str]]:
     mvs: set[str] = set()
     for tbl in tree.find_all(exp.Table):
         name = tbl.name.lower()
-        if name in cte_names:
+        # CTE names live in an unqualified namespace — don't exclude schema-qualified
+        # tables that happen to share the bare name (e.g. CTE "users" vs real "public.users").
+        if name in cte_names and not tbl.db:
             continue
         schema = (tbl.db or "public").lower()
         if schema == target_schema.lower():

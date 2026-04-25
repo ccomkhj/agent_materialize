@@ -72,3 +72,14 @@ def test_topo_diamond():
 def test_topo_cycle_raises():
     with pytest.raises(ValueError, match="cycle"):
         topological_order({"a": {"b"}, "b": {"a"}})
+
+
+def test_cte_name_collision_with_real_table_does_not_drop_real_reference():
+    sql = """
+        WITH users AS (SELECT id FROM public.accounts)
+        SELECT * FROM users u
+        JOIN public.users real_u ON real_u.id = u.id
+    """
+    sources, mvs = parse_sources(sql, target_schema="agent_mv")
+    assert sources == {"public.accounts", "public.users"}
+    assert mvs == set()
