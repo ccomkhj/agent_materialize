@@ -176,6 +176,114 @@ def doctor() -> None:
     typer.echo("✓ access boundary verified (runtime role cannot read base tables)")
 
 
+import yaml as _yaml
+
+from rich.console import Console
+from rich.table import Table
+
+from agent_materialize.lineage import topological_order, parse_sources
+
+_console = Console()
+
+
+def _runtime_dsn() -> str:
+    dsn = os.environ.get("AGENT_MV_RUNTIME_URL")
+    if not dsn:
+        typer.echo("AGENT_MV_RUNTIME_URL is not set", err=True)
+        raise typer.Exit(code=1)
+    return dsn
+
+
+@app.command()
+def status() -> None:
+    """Show a status table for all materialized views."""
+    from agent_materialize.config import load_config
+    import psycopg
+
+    cfg = load_config(Path.cwd() / "materialize.yaml")
+    dsn = _runtime_dsn()
+    table = Table(title="agent-materialize: views")
+    for col in ["name", "rows", "last_refreshed_at", "last_status", "sources"]:
+        table.add_column(col)
+    with psycopg.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            for v in cfg.views:
+                cur.execute(
+                    f"SELECT count(*) FROM {cfg.target_schema}.{v.name}"
+                )
+                rows = cur.fetchone()[0]
+                cur.execute(
+                    f"""
+                    SELECT finished_at, status FROM {cfg.target_schema}.refresh_history
+                    WHERE view_name = %s ORDER BY started_at DESC LIMIT 1
+                    """,
+                    (v.name,),
+                )
+                hist = cur.fetchone()
+                last_at = hist[0].isoformat() if hist and hist[0] else "-"
+                last_status = hist[1] if hist else "-"
+                table.add_row(v.name, str(rows), last_at, last_status, ", ".join(v.sources))
+    _console.print(table)
+
+
+@app.command()
+def refresh(name: str) -> None:
+    """Refresh a single view via the runtime SECURITY DEFINER function."""
+    import psycopg
+
+    dsn = _runtime_dsn()
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute("SELECT agent_mv.refresh_view(%s)", (name,))
+                result = cur.fetchone()[0]
+            except psycopg.Error as exc:
+                typer.echo(f"refresh failed: {exc}", err=True)
+                raise typer.Exit(code=1)
+    typer.echo(f"✓ refreshed {name} ({result['mode']}, {result['rows_after']} rows)")
+
+
+@app.command(name="refresh-all")
+def refresh_all() -> None:
+    """Refresh all views in topological order."""
+    from agent_materialize.config import load_config
+    import psycopg
+
+    cfg = load_config(Path.cwd() / "materialize.yaml")
+    deps = {v.name: parse_sources(v.sql, target_schema=cfg.target_schema)[1] for v in cfg.views}
+    order = topological_order(deps)
+    dsn = _runtime_dsn()
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            for name in order:
+                cur.execute("SELECT agent_mv.refresh_view(%s)", (name,))
+                typer.echo(f"✓ refreshed {name}")
+
+
+@app.command()
+def drop(name: str, yes: bool = typer.Option(False, "--yes")) -> None:
+    """Drop a view: remove from YAML and from the database."""
+    from agent_materialize.apply import apply_config
+    from agent_materialize.config import load_config
+
+    yaml_path = Path.cwd() / "materialize.yaml"
+    raw = _yaml.safe_load(yaml_path.read_text())
+    raw["views"] = [v for v in raw.get("views", []) if v["name"] != name]
+    if not yes and not typer.confirm(f"Drop view '{name}'?"):
+        raise typer.Exit(code=1)
+    yaml_path.write_text(_yaml.safe_dump(raw, sort_keys=False))
+    cfg = load_config(yaml_path)
+    apply_config(
+        cfg,
+        config_path=yaml_path,
+        admin_dsn=os.environ["DATABASE_URL"],
+        runtime_role="agent_mv_runtime",
+        runtime_password=os.environ.get("AGENT_MV_RUNTIME_PASSWORD", "agent_mv_runtime"),
+        confirm_drops=lambda names: True,
+    )
+    typer.echo(f"✓ dropped {name}")
+
+
 def main() -> None:
     app()
 
