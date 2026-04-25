@@ -39,24 +39,24 @@ The fix that everyone reaches for first is "just write some views and point the 
 
 ### 1. Install
 
-The package isn't on PyPI yet. Install from source — pick whichever fits your workflow:
+The package isn't on PyPI yet. Install it as a **global CLI tool** with `uv tool install` — that puts `agent-mv` on your PATH in its own isolated environment, no venv-activation needed:
 
 ```bash
-# Option A: from a local clone (recommended while iterating)
 git clone https://github.com/<you>/agent-materialize ~/code/agent-materialize
-cd ~/your-project
-uv add ~/code/agent-materialize
+cd ~/code/agent-materialize
+uv tool install .
 
-# Option B: directly from git
-cd ~/your-project
-uv add git+https://github.com/<you>/agent-materialize
+# If `agent-mv` isn't found afterward, ensure uv's bin dir is on PATH:
+uv tool update-shell && exec $SHELL
 
-# Once published:
-# uv add agent-materialize
+# Once published to PyPI:
+# uv tool install agent-materialize
 
 # Plus the system dep for the dashboard
 brew install graphviz   # macOS  (apt install graphviz on Debian/Ubuntu)
 ```
+
+> **Why `uv tool install` and not `uv add`?** `uv add` registers a library dependency inside one specific project's `.venv/`. `uv tool install` is uv's "install this CLI globally, in an isolated env" mode — closer to `pipx install`. For agent-materialize you want the second one: `agent-mv` is a CLI you'll call from any project directory.
 
 ### 2. Scaffold and configure
 
