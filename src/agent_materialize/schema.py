@@ -16,9 +16,9 @@ def bootstrap_schema(
 
     Idempotent. Safe to run on every `apply`.
     """
-    if not target_schema.replace("_", "").isalnum():
+    if not target_schema or not (target_schema[0].isalpha() or target_schema[0] == "_") or not target_schema.replace("_", "").isalnum():
         raise ValueError(f"unsafe target_schema: {target_schema}")
-    if not runtime_role.replace("_", "").isalnum():
+    if not runtime_role or not (runtime_role[0].isalpha() or runtime_role[0] == "_") or not runtime_role.replace("_", "").isalnum():
         raise ValueError(f"unsafe runtime_role: {runtime_role}")
 
     ensure_role(admin_dsn, role=runtime_role, password=runtime_password)

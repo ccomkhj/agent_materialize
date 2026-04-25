@@ -26,6 +26,8 @@ class ViewSpec(BaseModel):
 
     @model_validator(mode="after")
     def _check_name(self) -> "ViewSpec":
+        if not self.name or not (self.name[0].isalpha() or self.name[0] == "_"):
+            raise ValueError(f"view name must start with letter/underscore: {self.name}")
         if not self.name.replace("_", "").isalnum():
             raise ValueError(f"view name must be alphanumeric/underscore: {self.name}")
         return self

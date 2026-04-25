@@ -14,6 +14,9 @@ log = logging.getLogger(__name__)
 
 
 def _ident(name: str) -> str:
+    """Validate a Postgres identifier: must start with letter/underscore, then alnum/underscore."""
+    if not name or not (name[0].isalpha() or name[0] == "_"):
+        raise ValueError(f"unsafe identifier: {name}")
     if not name.replace("_", "").isalnum():
         raise ValueError(f"unsafe identifier: {name}")
     return name
@@ -62,6 +65,14 @@ def apply_config(
             # 3. drop views that are no longer in config
             wanted = {v.name for v in cfg.views}
             removed = sorted(existing - wanted)
+            # Guard: a removed view depended on by a kept view would cause a partial-apply
+            # failure mid-DROP. Surface it as a clear error before touching the database.
+            kept_dependencies = {dep for v in cfg.views for dep in deps[v.name]}
+            blocked = [r for r in removed if r in kept_dependencies]
+            if blocked:
+                raise ValueError(
+                    f"cannot drop views {blocked}: still referenced by kept views in materialize.yaml"
+                )
             if removed:
                 if not confirm_drops(removed):
                     raise SystemExit("apply aborted: drops not confirmed")
@@ -93,20 +104,25 @@ def apply_config(
                 )
 
             # 5. write lineage into the table
-            cur.execute(f"DELETE FROM {schema}.lineage")
+            # Scoped delete: only clear rows for views we manage; leaves any external rows alone.
+            managed_names = list(sources_per_view.keys())
+            cur.execute(
+                f"DELETE FROM {schema}.lineage WHERE view_name = ANY(%s)",
+                (managed_names,),
+            )
+            schema_prefix = cfg.target_schema + "."
             for name in order:
-                base, mvs = parse_sources(views_by_name[name].sql, target_schema=cfg.target_schema)
-                for src in base:
+                for src in sources_per_view[name]:
+                    if src.startswith(schema_prefix):
+                        kind = "view"
+                        stored = src[len(schema_prefix):]
+                    else:
+                        kind = "table"
+                        stored = src
                     cur.execute(
                         f"INSERT INTO {schema}.lineage (view_name, source_kind, source_name) "
-                        f"VALUES (%s, 'table', %s)",
-                        (name, src),
-                    )
-                for src in mvs:
-                    cur.execute(
-                        f"INSERT INTO {schema}.lineage (view_name, source_kind, source_name) "
-                        f"VALUES (%s, 'view', %s)",
-                        (name, src),
+                        f"VALUES (%s, %s, %s)",
+                        (name, kind, stored),
                     )
 
             # 6. pg_depend cross-check (defensive — sqlglot is the YAML source of truth)
