@@ -16,7 +16,20 @@ class SampleQueryError(ValueError):
 def _admin_dsn() -> str:
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
-        raise RuntimeError("DATABASE_URL is required for setup-mcp")
+        # Lazy fallback: try to find a .env walking up from CWD.
+        from dotenv import find_dotenv, load_dotenv
+
+        env_path = find_dotenv(usecwd=True)
+        if env_path:
+            load_dotenv(env_path, override=False)
+            dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        raise RuntimeError(
+            "DATABASE_URL is required for setup-mcp. "
+            f"Searched .env from cwd={os.getcwd()!r}; either set DATABASE_URL "
+            f"in the environment that launches this MCP server, or ensure the "
+            f"server runs from a directory under one containing a .env file."
+        )
     return dsn
 
 
@@ -191,7 +204,10 @@ def finalize_config(approved_names: list[str]) -> dict:
 
 
 def main() -> None:
+    from dotenv import load_dotenv
     from mcp.server.fastmcp import FastMCP
+
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
 
     server = FastMCP("agent-materialize-setup")
     server.tool()(list_schemas)
