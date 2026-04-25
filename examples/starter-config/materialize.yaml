@@ -1,0 +1,10 @@
+version: 1
+target_schema: agent_mv
+views:
+  - name: customer_rollup
+    sql_file: materialize/customer_rollup.sql
+    indexes:
+      - columns: [customer_id]
+        unique: true
+    description: "One row per customer with lifetime value + activity."
+    sources: []  # filled by `agent-mv apply`
