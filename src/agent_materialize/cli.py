@@ -68,6 +68,114 @@ def discover() -> None:
     )
 
 
+@app.command()
+def apply(
+    yes: bool = typer.Option(False, "--yes", help="Auto-confirm drops"),
+) -> None:
+    """Diff materialize.yaml against the database; create/update/drop MVs."""
+    import os
+
+    import psycopg  # noqa: F401 — imported for side-effects check at module level
+
+    from agent_materialize.apply import apply_config
+    from agent_materialize.config import load_config
+
+    cwd = Path.cwd()
+    yaml_path = cwd / "materialize.yaml"
+    if not yaml_path.is_file():
+        typer.echo("materialize.yaml not found. Run `agent-mv init` first.", err=True)
+        raise typer.Exit(code=1)
+
+    admin_dsn = os.environ.get("DATABASE_URL")
+    if not admin_dsn:
+        typer.echo("DATABASE_URL is not set", err=True)
+        raise typer.Exit(code=1)
+    runtime_password = os.environ.get("AGENT_MV_RUNTIME_PASSWORD", "agent_mv_runtime")
+
+    cfg = load_config(yaml_path)
+
+    def _confirm(names: list[str]) -> bool:
+        if yes:
+            return True
+        return typer.confirm(f"Drop {len(names)} view(s): {', '.join(names)}?")
+
+    apply_config(
+        cfg,
+        config_path=yaml_path,
+        admin_dsn=admin_dsn,
+        runtime_role="agent_mv_runtime",
+        runtime_password=runtime_password,
+        confirm_drops=_confirm,
+    )
+    typer.echo(f"✓ applied {len(cfg.views)} view(s)")
+
+
+@app.command()
+def doctor() -> None:
+    """Verify roles, schema, and the access boundary."""
+    import os
+
+    import psycopg
+
+    admin_dsn = os.environ.get("DATABASE_URL")
+    runtime_dsn = os.environ.get("AGENT_MV_RUNTIME_URL")
+    if not admin_dsn or not runtime_dsn:
+        typer.echo("DATABASE_URL and AGENT_MV_RUNTIME_URL must be set", err=True)
+        raise typer.Exit(code=1)
+
+    # 1. agent_mv schema exists
+    with psycopg.connect(admin_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'agent_mv'"
+            )
+            if cur.fetchone() is None:
+                typer.echo("✗ agent_mv schema missing — run `agent-mv apply`", err=True)
+                raise typer.Exit(code=1)
+
+    # 2. runtime role can SELECT from agent_mv (validates basic GRANTs)
+    with psycopg.connect(runtime_dsn) as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute("SELECT count(*) FROM agent_mv.refresh_history")
+            except psycopg.errors.InsufficientPrivilege:
+                typer.echo("✗ runtime role cannot read agent_mv schema", err=True)
+                raise typer.Exit(code=1)
+            except psycopg.errors.UndefinedTable:
+                pass  # schema exists but table not yet created — grants are set at schema level
+
+    # 3. CRITICAL: runtime role MUST NOT be able to read base tables.
+    # Find any user table in `public` to test against; if none, error out.
+    with psycopg.connect(admin_dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname='public' LIMIT 1"
+            )
+            row = cur.fetchone()
+    if row is None:
+        typer.echo(
+            "⚠ no tables in public schema; cannot verify access boundary. "
+            "Create at least one base table and re-run.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    sample_table = row[0]
+
+    with psycopg.connect(runtime_dsn) as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(f"SELECT 1 FROM public.{sample_table} LIMIT 1")
+                typer.echo(
+                    f"✗ access boundary FAILED: runtime role can read public.{sample_table}",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            except psycopg.errors.InsufficientPrivilege:
+                pass  # expected
+
+    typer.echo("✓ access boundary verified (runtime role cannot read base tables)")
+
+
 def main() -> None:
     app()
 
