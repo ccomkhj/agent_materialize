@@ -91,7 +91,7 @@ def init() -> None:
     typer.echo("✓ initialized agent-materialize")
     typer.echo("  - materialize.yaml")
     typer.echo("  - .env.example")
-    typer.echo("  - materialize/")
+    typer.echo("  - materialize/  (empty — your agent fills this during onboarding)")
     typer.echo("  - .mcp.json (setup MCP wired up)")
     typer.echo(f"  - skills symlinked to {skills_dst}")
     typer.echo(f"  - slash commands symlinked to {commands_dst}")

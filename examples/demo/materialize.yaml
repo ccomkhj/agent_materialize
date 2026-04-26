@@ -1,0 +1,33 @@
+version: 1
+target_schema: agent_mv
+views:
+- name: customer_rollup
+  sql_file: materialize/customer_rollup.sql
+  description: 'One row per customer: order count, lifetime spend, last order.'
+  indexes:
+  - columns:
+    - customer_id
+    unique: true
+  sources:
+  - public.orders
+  - public.payments
+  - public.users
+- name: daily_revenue
+  sql_file: materialize/daily_revenue.sql
+  description: Gross revenue per product per day, last 90 days.
+  indexes:
+  - columns:
+    - day
+    - product_id
+    unique: true
+  sources:
+  - public.order_items
+  - public.orders
+  - public.payments
+  - public.products
+- name: top_customers_30d
+  sql_file: materialize/top_customers_30d.sql
+  description: Top 10 customers by lifetime spend who ordered in the last 30 days.
+    Reads from customer_rollup.
+  sources:
+  - agent_mv.customer_rollup

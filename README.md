@@ -34,6 +34,21 @@ The fix that everyone reaches for first is "just write some views and point the 
 | **Slash commands** | `/agent-materialize-onboard`, `/agent-materialize-add-view`, `/agent-materialize-troubleshoot` — user-typed entry points that load the matching skill. Symlinked into `.claude/commands/` on `init`. |
 | **`materialize.yaml`** | Single source of truth for view definitions. Lineage is parsed by sqlglot at apply-time and written back into the YAML. |
 
+## Try it in 30 seconds
+
+A self-contained demo lives in [`examples/demo/`](examples/demo/) — Postgres in Docker, three seeded views (one with an MV-on-MV dependency), the full apply → doctor → refresh-all → dashboard flow, plus a final `psql` round-trip that proves the access boundary holds.
+
+```bash
+git clone https://github.com/ccomkhj/agent_materialize
+cd agent_materialize/examples/demo
+./run.sh                # bring it up; prints a file:// link to the rendered dashboard
+./run.sh down           # tear down the container, volume, and generated files
+```
+
+That's the recommended way to kick the tires before wiring it into your own project. The dashboard you'll see at the end:
+
+![dashboard](docs/images/dashboard.png)
+
 ## Quickstart
 
 > **Run these commands in your own project directory, not inside this repo.** Scaffolding lands in your CWD; you don't want it inside this package's source tree.
@@ -45,8 +60,8 @@ The flow is **skill-first**. You install the package, point your MCP client at t
 The package isn't on PyPI yet. Install it as a **global CLI tool** with `uv tool install` — that puts `agent-mv` on your PATH in its own isolated environment, no venv-activation needed. Your agent calls these commands under the hood; you rarely type them yourself.
 
 ```bash
-git clone https://github.com/ccomkhj/agent-materialize
-cd agent-materialize
+git clone https://github.com/ccomkhj/agent_materialize
+cd agent_materialize
 uv tool install .
 
 # If `agent-mv` isn't found afterward, ensure uv's bin dir is on PATH:
@@ -66,7 +81,10 @@ In your project directory, write `.env` and run `agent-mv init`:
 cd your-project
 cat > .env <<'EOF'
 DATABASE_URL=postgresql://USER:PASS@HOST:5432/DBNAME             # full setup-time privileges
-# Runtime credentials are decided in step 4. Leave as placeholders for now:
+# `agent-mv apply` creates the runtime role and sets its password to
+# AGENT_MV_RUNTIME_PASSWORD. The literal value doesn't matter (pick one or
+# leave CHANGEME), but the password embedded in AGENT_MV_RUNTIME_URL must
+# match — that URL is what `psql` and the runtime MCP use to connect.
 AGENT_MV_RUNTIME_URL=postgresql://agent_mv_runtime:CHANGEME@HOST:5432/DBNAME
 AGENT_MV_RUNTIME_PASSWORD=CHANGEME
 EOF
@@ -134,6 +152,8 @@ Then re-run `agent-mv doctor`.
 **Setup MCP fails every tool call with `DATABASE_URL is required for setup-mcp`.** The MCP server can't see your `.env`. Either it was launched before the file existed, or its working directory isn't under the project. Make sure `.env` lives at the project root, then reconnect the MCP (`/mcp`, or restart the session).
 
 **The agent proposes generic views that don't match your workload.** It's missing context on what your consumer actually asks. Re-run `/agent-materialize-onboard` and lead with concrete example questions ("which POs need to be created?", "what's selling slow on Amazon?") before letting it explore.
+
+**No MCP-capable agent on hand?** You can drive the flow by hand: write `materialize/<view>.sql` (a plain `SELECT`) and add a matching entry to `materialize.yaml`, then run `agent-mv apply` followed by `agent-mv doctor`. See [`examples/demo/`](examples/demo/) for a worked example with three views.
 
 ## How it works
 
